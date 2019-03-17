@@ -66,6 +66,8 @@ type fileRestorer struct {
 
 	dst   string
 	files []*fileInfo
+
+	onChunk func(bytesSoFar uint64) // Called when ever we write a chunk to disk.
 }
 
 func newFileRestorer(dst string, packLoader func(ctx context.Context, h restic.Handle, length int, offset int64, fn func(rd io.Reader) error) error, key *crypto.Key, idx filePackTraverser) *fileRestorer {
@@ -76,6 +78,7 @@ func newFileRestorer(dst string, packLoader func(ctx context.Context, h restic.H
 		filesWriter: newFilesWriter(filesWriterCount),
 		packCache:   newPackCache(packCacheCapacity),
 		dst:         dst,
+		onChunk:     func(bytesSoFar uint64) {},
 	}
 }
 
@@ -93,7 +96,7 @@ type processingInfo struct {
 	files map[*fileInfo]error
 }
 
-func (r *fileRestorer) restoreFiles(ctx context.Context, onError func(path string, err error)) error {
+func (r *fileRestorer) restoreFiles(ctx context.Context, onError func(path string, err error), onChunk func(bytesWritten uint64)) error {
 	// TODO conditionally enable when debug log is on
 	// for _, file := range r.files {
 	// 	dbgmsg := file.location + ": "
@@ -113,6 +116,7 @@ func (r *fileRestorer) restoreFiles(ctx context.Context, onError func(path strin
 	// 	})
 	// 	debug.Log(dbgmsg)
 	// }
+	r.onChunk = onChunk
 
 	inprogress := make(map[*fileInfo]struct{})
 	queue, err := newPackQueue(r.idx, r.files, func(files map[*fileInfo]struct{}) bool {
@@ -288,6 +292,7 @@ func (r *fileRestorer) processPack(ctx context.Context, request processingInfo, 
 					request.files[file] = err
 					break // could not restore the file
 				}
+				r.onChunk(uint64(len(buf)))
 			}
 			return false
 		})

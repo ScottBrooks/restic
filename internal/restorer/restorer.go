@@ -20,6 +20,7 @@ type Restorer struct {
 
 	Error        func(location string, err error) error
 	SelectFilter func(item string, dstpath string, node *restic.Node) (selectedForRestore bool, childMayBeSelected bool)
+	Progress func(totalBytes, bytesSoFar uint64)
 }
 
 var restorerAbortOnAllErrors = func(location string, err error) error { return err }
@@ -30,6 +31,7 @@ func NewRestorer(repo restic.Repository, id restic.ID) (*Restorer, error) {
 		repo:         repo,
 		Error:        restorerAbortOnAllErrors,
 		SelectFilter: func(string, string, *restic.Node) (bool, bool) { return true, true },
+		Progress: func(totalBytes, bytesSofar uint64) {},
 	}
 
 	var err error
@@ -208,6 +210,7 @@ func (res *Restorer) RestoreTo(ctx context.Context, dst string) error {
 
 	filerestorer := newFileRestorer(dst, res.repo.Backend().Load, res.repo.Key(), filePackTraverser{lookup: res.repo.Index().Lookup})
 
+	var totalSize uint64
 	// first tree pass: create directories and collect all files to restore
 	err = res.traverseTree(ctx, dst, string(filepath.Separator), *res.sn.Tree, treeVisitor{
 		enterDir: func(node *restic.Node, target, location string) error {
@@ -232,6 +235,8 @@ func (res *Restorer) RestoreTo(ctx context.Context, dst string) error {
 				return nil // deal with empty files later
 			}
 
+			totalSize += node.Size
+
 			if node.Links > 1 {
 				if idx.Has(node.Inode, node.DeviceID) {
 					return nil
@@ -248,8 +253,17 @@ func (res *Restorer) RestoreTo(ctx context.Context, dst string) error {
 	if err != nil {
 		return err
 	}
+	var written uint64
 
-	err = filerestorer.restoreFiles(ctx, func(location string, err error) { res.Error(location, err) })
+	err = filerestorer.restoreFiles(ctx,
+		func(location string, err error) {
+			res.Error(location, err)
+		},
+		func(bytesWritten uint64) {
+			written += bytesWritten
+			res.Progress(totalSize, written)
+		},
+	)
 	if err != nil {
 		return err
 	}

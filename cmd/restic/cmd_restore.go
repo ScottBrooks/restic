@@ -1,12 +1,13 @@
 package main
 
 import (
+	"strings"
+
 	"github.com/restic/restic/internal/debug"
 	"github.com/restic/restic/internal/errors"
 	"github.com/restic/restic/internal/filter"
 	"github.com/restic/restic/internal/restic"
 	"github.com/restic/restic/internal/restorer"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -38,6 +39,7 @@ type RestoreOptions struct {
 	Paths              []string
 	Tags               restic.TagLists
 	Verify             bool
+	Progress           bool
 }
 
 var restoreOptions RestoreOptions
@@ -56,6 +58,7 @@ func init() {
 	flags.Var(&restoreOptions.Tags, "tag", "only consider snapshots which include this `taglist` for snapshot ID \"latest\"")
 	flags.StringArrayVar(&restoreOptions.Paths, "path", nil, "only consider snapshots which include this (absolute) `path` for snapshot ID \"latest\"")
 	flags.BoolVar(&restoreOptions.Verify, "verify", false, "verify restored files content")
+	flags.BoolVar(&restoreOptions.Progress, "progress", false, "report progress while doing restore.")
 }
 
 func runRestore(opts RestoreOptions, gopts GlobalOptions, args []string) error {
@@ -179,6 +182,12 @@ func runRestore(opts RestoreOptions, gopts GlobalOptions, args []string) error {
 	}
 
 	Verbosef("restoring %s to %s\n", res.Snapshot(), opts.Target)
+
+	if opts.Progress {
+		res.Progress = func(totalBytes, bytesSoFar uint64) {
+			PrintProgress("PROGRESS: %f %d %d", float64(bytesSoFar)/float64(totalBytes), bytesSoFar, totalBytes)
+		}
+	}
 
 	err = res.RestoreTo(ctx, opts.Target)
 	if err == nil && opts.Verify {
