@@ -141,6 +141,7 @@ func (s *TreeSaver) save(ctx context.Context, snPath string, node *restic.Node, 
 	if err != nil {
 		return nil, stats, err
 	}
+	debug.Log("%s -> %s", node.Name, id)
 
 	node.Subtree = &id
 	return node, stats, nil

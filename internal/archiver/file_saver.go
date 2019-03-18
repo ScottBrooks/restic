@@ -217,6 +217,7 @@ func (s *FileSaver) saveFile(ctx context.Context, chnker *chunker.Chunker, snPat
 			stats.DataBlobs++
 			stats.DataSize += uint64(res.Length())
 		}
+		debug.Log("%s -> %s", f.Name(), res.ID())
 
 		node.Content = append(node.Content, res.ID())
 	}

@@ -79,6 +79,10 @@ type Archiver struct {
 	// be saved. Enabling it may result in much metadata, so it's off by
 	// default.
 	WithAtime bool
+
+	// NopUpload disables actually uploading anything to the repo.
+	// This can be used to check to see which files the repo thinks have changed.
+	NopUpload bool
 }
 
 // Options is used to configure the archiver.
@@ -734,9 +738,27 @@ func (arch *Archiver) loadParentTree(ctx context.Context, snapshotID restic.ID) 
 	return tree
 }
 
+type NopRepoSaver struct {
+	repo restic.Repository
+}
+
+func (nop *NopRepoSaver) SaveBlob(ctx context.Context, t restic.BlobType, data []byte, id restic.ID) (restic.ID, error) {
+	debug.Log("Nop Saving: %s", id)
+	//return restic.ID{}, fmt.Errorf("NOP Cant save")
+	return id, nil
+}
+
+func (nop *NopRepoSaver) Index() restic.Index {
+	return nop.repo.Index()
+}
+
 // runWorkers starts the worker pools, which are stopped when the context is cancelled.
 func (arch *Archiver) runWorkers(ctx context.Context, t *tomb.Tomb) {
-	arch.blobSaver = NewBlobSaver(ctx, t, arch.Repo, arch.Options.SaveBlobConcurrency)
+	var saver Saver = arch.Repo
+	if arch.NopUpload {
+		saver = &NopRepoSaver{arch.Repo}
+	}
+	arch.blobSaver = NewBlobSaver(ctx, t, saver, arch.Options.SaveBlobConcurrency)
 
 	arch.fileSaver = NewFileSaver(ctx, t,
 		arch.FS,
@@ -768,7 +790,7 @@ func (arch *Archiver) Snapshot(ctx context.Context, targets []string, opts Snaps
 
 	start := time.Now()
 
-	debug.Log("starting snapshot")
+	debug.Log("starting snapshot: %+v", atree)
 	rootTreeID, stats, err := func() (restic.ID, ItemStats, error) {
 		tree, err := arch.SaveTree(wctx, "/", atree, arch.loadParentTree(wctx, opts.ParentSnapshot))
 		if err != nil {
