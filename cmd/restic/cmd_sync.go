@@ -54,6 +54,7 @@ type SyncOptions struct {
 	Tags     restic.TagLists
 	Verify   bool
 	Progress bool
+	Delete bool
 }
 
 var syncOptions SyncOptions
@@ -69,12 +70,14 @@ func init() {
 	flags.StringArrayVar(&syncOptions.Paths, "path", nil, "only consider snapshots which include this (absolute) `path` for snapshot ID \"latest\"")
 	flags.BoolVar(&syncOptions.Verify, "verify", false, "verify restored files content")
 	flags.BoolVar(&syncOptions.Progress, "progress", false, "report progress while doing restore.")
+	flags.BoolVar(&syncOptions.Delete, "delete", false, "clean up local files which are not in the remote repository")
 }
 
 type FileTracker struct {
 	sync.Mutex
-	FilesToGet    map[string]bool
-	FilesToDelete []string
+	FilesToGet     map[string]bool
+	FilesToDelete  []string
+	UnexpectedDirs map[string]bool
 }
 
 func (ft *FileTracker) CompleteItem(item string, remoteCopy, localCopy *restic.Node, s archiver.ItemStats, d time.Duration) {
@@ -88,6 +91,16 @@ func (ft *FileTracker) CompleteItem(item string, remoteCopy, localCopy *restic.N
 		if remoteCopy == nil {
 			// No previous file on record, this is a new file we should delete
 			ft.FilesToDelete = append(ft.FilesToDelete, item)
+
+			// Mark any directories these unexpected files are in as unexpected.
+			// Any that are not later un-marked in a remote scan are deleted.
+			for {
+				parentDir := path.Dir(item)
+				if _, ok := ft.UnexpectedDirs[parentDir]; ok {
+					break
+				}
+				ft.UnexpectedDirs[parentDir] = true
+			}
 		} else if !remoteCopy.EqualsContent(*localCopy) {
 			// We are different, we should restore this file.
 			ft.FilesToGet[item] = true
@@ -100,7 +113,7 @@ func runSync(opts SyncOptions, gopts GlobalOptions, term *termstatus.Terminal, a
 	ctx := gopts.ctx
 
 	start := time.Now()
-	fileTracker := FileTracker{FilesToGet: map[string]bool{}}
+	fileTracker := FileTracker{FilesToGet: map[string]bool{}, UnexpectedDirs: map[string]bool{}}
 
 	switch {
 	case len(args) == 0:
@@ -251,10 +264,11 @@ func runSync(opts SyncOptions, gopts GlobalOptions, term *termstatus.Terminal, a
 			shouldGet, ok = true, true
 		}
 
-		if node.Type == "dir" {
-			Verbosef("Directory %s\n", item)
+		// Unmark for deletion any directories that exist on the remote server
+		if _, ok := fileTracker.UnexpectedDirs[item]; ok && node.Type == "dir" {
+			Verbosef("Unmarked %s for deletion\n", item)
+			delete(fileTracker.UnexpectedDirs, item)
 		}
-
 
 		selectedForRestore = ok && shouldGet
 		//childMayBeSelected = (childMayMatch) && node.Type == "dir"
@@ -295,18 +309,55 @@ func runSync(opts SyncOptions, gopts GlobalOptions, term *termstatus.Terminal, a
 		}
 		Verbosef("Files Fetched: %v\n", filesFetched)
 		Verbosef("Files To Delete: %v\n", fileTracker.FilesToDelete)
+		Verbosef("Directories To Delete: %v\n", fileTracker.UnexpectedDirs)
 		Verbosef("Total time: %s\n", time.Now())
 	}
 
-	// Delete the files to be deleted
+	if opts.Delete {
+		Verbosef("%d errors while deleting files\n", deleteFilesAndDirectories(fileTracker, opts))
+	} else {
+		Verbosef("Skipping file deletion as --delete was not passed.")
+	}
+
+	return err
+}
+
+func deleteFilesAndDirectories(fileTracker FileTracker, opts SyncOptions) int {
+	errorCount := 0
 	for _, file := range fileTracker.FilesToDelete {
 		fileName := path.Join(opts.Target, file)
 		Verbosef("Deleting %s\n", fileName)
-		err = os.Remove(fileName)
+		err := os.Remove(fileName)
 		if err != nil {
+			errorCount++
 			Printf("Error deleting %s\n", fileName)
 		}
 	}
 
-	return err
+	// As we are not using RemoveAll (hence why we do files first), we cannot delete non-empty directories, so a bug in
+	// the directory marking logic cannot result in the deletion of directories containing files
+	// We must delete deeper directories first, however - e.g. in the case of /A/B/, we must first delete B/, then /A/B
+	depthSortedUnexpectedDirs := map[int][]string{}
+	maxDepth := 0
+	for dir := range fileTracker.UnexpectedDirs {
+		depth := strings.Count(dir, "/")
+		if depth > maxDepth {
+			maxDepth = depth
+		}
+		depthSortedUnexpectedDirs[depth] = append(depthSortedUnexpectedDirs[depth], dir)
+	}
+	for maxDepth >= 0 {
+		for _, dir := range depthSortedUnexpectedDirs[maxDepth] {
+			fileName := path.Join(opts.Target, dir)
+			Verbosef("Deleting dir %s\n", fileName)
+			err := os.Remove(fileName)
+			if err != nil {
+				errorCount++
+				Printf("Error deleting %s\n", fileName)
+			}
+		}
+		maxDepth--
+	}
+
+	return errorCount
 }
