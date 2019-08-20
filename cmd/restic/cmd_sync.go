@@ -7,8 +7,6 @@ import (
 	"sync"
 	"time"
 
-	_ "net/http/pprof"
-
 	"github.com/restic/restic/internal/archiver"
 	"github.com/restic/restic/internal/errors"
 	"github.com/restic/restic/internal/fs"
@@ -212,12 +210,13 @@ func runSync(opts SyncOptions, gopts GlobalOptions, term *termstatus.Terminal, a
 		Time:           time.Now(),
 		Hostname:       opts.Host,
 		ParentSnapshot: id,
+		AllowEmpty:     true,
 	}
 
 	if !gopts.JSON {
 		p.V("start backup on %v", targets)
 	}
-	_, _, err = arch.Snapshot(gopts.ctx, targets, snapshotOpts)
+	_, err = arch.DrySnapshot(gopts.ctx, targets, snapshotOpts)
 	if err != nil {
 		return errors.Fatalf("unable to save snapshot: %v", err)
 	}
