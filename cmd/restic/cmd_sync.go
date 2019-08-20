@@ -84,7 +84,7 @@ func (ft *FileTracker) CompleteItem(item string, remoteCopy, localCopy *restic.N
 	if localCopy == nil {
 		return
 	}
-	Printf("Item: %s Current: %+v Previous: %+v\n", item, localCopy, remoteCopy)
+	Verbosef("Item: %s Current: %+v Previous: %+v\n", item, localCopy, remoteCopy)
 	if localCopy.Type == "file" {
 		ft.Lock()
 		ft.FilesToGet[item] = false
