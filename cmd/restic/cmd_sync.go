@@ -248,8 +248,15 @@ func runSync(opts SyncOptions, gopts GlobalOptions, term *termstatus.Terminal, a
 		if !ok && node.Type == "file" {
 			Verbosef("Fetching %s - file was not found in local scan\n", item)
 			fileTracker.FilesToGet[item] = true
+			shouldGet, ok = true, true
 		}
-		selectedForRestore = (!ok && node.Type == "file") || (ok && shouldGet)
+
+		if node.Type == "dir" {
+			Verbosef("Directory %s\n", item)
+		}
+
+
+		selectedForRestore = ok && shouldGet
 		//childMayBeSelected = (childMayMatch) && node.Type == "dir"
 		childMayBeSelected = node.Type == "dir"
 
