@@ -286,7 +286,7 @@ func runSync(opts SyncOptions, gopts GlobalOptions, term *termstatus.Terminal, a
 
 	p.Finish(id)
 
-	if VerboseLoggingEnabled() {
+	if globalOptions.verbosity >= 1 {
 		var filesFetched []string
 		for k, v := range fileTracker.FilesToGet {
 			if v == true {

@@ -187,13 +187,9 @@ func Printf(format string, args ...interface{}) {
 	}
 }
 
-func VerboseLoggingEnabled() bool {
-	return globalOptions.verbosity >= 1
-}
-
 // Verbosef calls Printf to write the message when the verbose flag is set.
 func Verbosef(format string, args ...interface{}) {
-	if VerboseLoggingEnabled() {
+	if globalOptions.verbosity >= 1 {
 		Printf(format, args...)
 	}
 }
