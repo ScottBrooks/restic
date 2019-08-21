@@ -83,6 +83,12 @@ func childMatch(patterns, strs []string) (matched bool, err error) {
 		return true, nil
 	}
 
+	ok, pos := hasDoubleWildcard(patterns)
+	if ok && len(strs) >= pos {
+		// cut off at the double wildcard
+		strs = strs[:pos]
+	}
+
 	// match path against absolute pattern prefix
 	l := 0
 	if len(strs) > len(patterns) {
@@ -93,7 +99,39 @@ func childMatch(patterns, strs []string) (matched bool, err error) {
 	return match(patterns[0:l], strs)
 }
 
+func hasDoubleWildcard(list []string) (ok bool, pos int) {
+	for i, item := range list {
+		if item == "**" {
+			return true, i
+		}
+	}
+
+	return false, 0
+}
+
 func match(patterns, strs []string) (matched bool, err error) {
+	if ok, pos := hasDoubleWildcard(patterns); ok {
+		// gradually expand '**' into separate wildcards
+		for i := 0; i <= len(strs)-len(patterns)+1; i++ {
+			newPat := make([]string, pos)
+			copy(newPat, patterns[:pos])
+			for k := 0; k < i; k++ {
+				newPat = append(newPat, "*")
+			}
+			newPat = append(newPat, patterns[pos+1:]...)
+
+			matched, err := match(newPat, strs)
+			if err != nil {
+				return false, err
+			}
+
+			if matched {
+				return true, nil
+			}
+		}
+
+		return false, nil
+	}
 
 	if len(patterns) == 0 && len(strs) == 0 {
 		return true, nil

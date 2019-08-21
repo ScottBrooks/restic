@@ -321,7 +321,7 @@ func deleteFilesAndDirectories(fileTracker FileTracker, opts SyncOptions) int {
 
 	// As we are not using RemoveAll (hence why we do files first), we cannot delete non-empty directories, so a bug in
 	// the directory marking logic cannot result in the deletion of directories containing files
-	// We must delete deeper directories first, however - e.g. in the case of /A/B/, we must first delete B/, then /A/B
+	// We must delete deeper directories first, however - e.g. in the case of /A/B/, we must first delete B/, then A/
 	depthSortedUnexpectedDirs := map[int][]string{}
 	maxDepth := 0
 	for dir := range fileTracker.UnexpectedDirs {
