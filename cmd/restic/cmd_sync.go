@@ -111,8 +111,6 @@ func (ft *FileTracker) CompleteItem(item string, remoteCopy, localCopy *restic.N
 
 func runSync(opts SyncOptions, gopts GlobalOptions, term *termstatus.Terminal, args []string) error {
 	ctx := gopts.ctx
-
-	start := time.Now()
 	fileTracker := FileTracker{FilesToGet: map[string]bool{}, UnexpectedDirs: map[string]bool{}}
 
 	switch {
@@ -194,8 +192,6 @@ func runSync(opts SyncOptions, gopts GlobalOptions, term *termstatus.Terminal, a
 		//Printf("Item: %s Stats: %+v\n", item, s)
 	}
 
-	preScan := time.Now()
-	Verbosef("Time to start scanning: %s\n", preScan.Sub(start))
 	var targetFS fs.FS = fs.Local{}
 	sc := archiver.NewScanner(targetFS)
 	sc.SelectByName = selectByNameFilter
@@ -205,9 +201,6 @@ func runSync(opts SyncOptions, gopts GlobalOptions, term *termstatus.Terminal, a
 
 	Verbosef("start scan on %v\n", targets)
 	t.Go(func() error { return sc.Scan(t.Context(gopts.ctx), targets) })
-
-	postScan := time.Now()
-	Verbosef("Time to scan: %s\n", postScan.Sub(preScan))
 
 	arch := archiver.New(repo, targetFS, archiver.Options{})
 	arch.SelectByName = selectByNameFilter
@@ -234,8 +227,6 @@ func runSync(opts SyncOptions, gopts GlobalOptions, term *termstatus.Terminal, a
 		return errors.Fatalf("unable to save snapshot: %v", err)
 	}
 	p.V("Waiting to finish")
-	postSnap := time.Now()
-	Verbosef("Time to snapshot: %s\n", postSnap.Sub(postScan))
 
 	// The following code is verbatim the code from cmd_restore.
 
@@ -255,8 +246,6 @@ func runSync(opts SyncOptions, gopts GlobalOptions, term *termstatus.Terminal, a
 		swapped := strings.Replace(item, "\\", "/", -1)
 		shouldGet, ok := fileTracker.FilesToGet[swapped]
 
-		//matched, childMayMatch, err := filter.List(fileTracker.FilesToGet, item)
-
 		// If we didn't find a result, it means we did not scan it locally & should fetch it
 		if !ok && node.Type == "file" {
 			Verbosef("Fetching %s - file was not found in local scan\n", item)
@@ -271,7 +260,6 @@ func runSync(opts SyncOptions, gopts GlobalOptions, term *termstatus.Terminal, a
 		}
 
 		selectedForRestore = ok && shouldGet
-		//childMayBeSelected = (childMayMatch) && node.Type == "dir"
 		childMayBeSelected = node.Type == "dir"
 
 		return selectedForRestore, childMayBeSelected
@@ -296,8 +284,6 @@ func runSync(opts SyncOptions, gopts GlobalOptions, term *termstatus.Terminal, a
 		Printf("There were %d errors\n", totalErrors)
 	}
 
-	postRestore := time.Now()
-	Verbosef("PostRestore time: %s\n", postRestore.Sub(postSnap))
 	p.Finish(id)
 
 	if VerboseLoggingEnabled() {
@@ -310,11 +296,11 @@ func runSync(opts SyncOptions, gopts GlobalOptions, term *termstatus.Terminal, a
 		Verbosef("Files Fetched: %v\n", filesFetched)
 		Verbosef("Files To Delete: %v\n", fileTracker.FilesToDelete)
 		Verbosef("Directories To Delete: %v\n", fileTracker.UnexpectedDirs)
-		Verbosef("Total time: %s\n", time.Now())
 	}
 
 	if opts.Delete {
-		Verbosef("%d errors while deleting files\n", deleteFilesAndDirectories(fileTracker, opts))
+		errCount := deleteFilesAndDirectories(fileTracker, opts)
+		Printf("%d errors while deleting files\n", errCount)
 	} else {
 		Verbosef("Skipping file deletion as --delete was not passed.")
 	}
