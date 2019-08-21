@@ -372,6 +372,41 @@ func (node *Node) UnmarshalJSON(data []byte) error {
 	return errors.Wrap(err, "Unquote")
 }
 
+// Tests if nodes are content-equal (along with a few other attributes). This is used for fetching content where
+//   e.g. the modification date may differ but we consider them equal anyway to avoid pointless file transfers
+func (node Node) EqualsContent(other Node) bool {
+	if node.Name != other.Name {
+		return false
+	}
+	if node.Type != other.Type {
+		return false
+	}
+	if node.Size != other.Size {
+		return false
+	}
+	if !node.sameContent(other) {
+		return false
+	}
+	if node.Error != other.Error {
+		return false
+	}
+	if node.Subtree != nil {
+		if other.Subtree == nil {
+			return false
+		}
+
+		if !node.Subtree.Equal(*other.Subtree) {
+			return false
+		}
+	} else {
+		if other.Subtree != nil {
+			return false
+		}
+	}
+
+	return true
+}
+
 func (node Node) Equals(other Node) bool {
 	if node.Name != other.Name {
 		return false

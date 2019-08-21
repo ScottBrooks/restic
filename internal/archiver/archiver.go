@@ -844,3 +844,56 @@ func (arch *Archiver) Snapshot(ctx context.Context, targets []string, opts Snaps
 
 	return sn, id, nil
 }
+
+// DrySnapshot does most of the work of capturing a snapshot, but does not save it to the back-end.
+func (arch *Archiver) DrySnapshot(ctx context.Context, targets []string, opts SnapshotOptions) (restic.ID, error) {
+	cleanTargets, err := resolveRelativeTargets(arch.FS, targets)
+	if err != nil {
+		return restic.ID{}, err
+	}
+
+	atree, err := NewTree(arch.FS, cleanTargets)
+	if err != nil {
+		return restic.ID{}, err
+	}
+
+	var t tomb.Tomb
+	wctx := t.Context(ctx)
+
+	arch.runWorkers(wctx, &t)
+
+	start := time.Now()
+
+	debug.Log("starting snapshot: %+v", atree)
+	rootTreeID, stats, err := func() (restic.ID, ItemStats, error) {
+		tree, err := arch.SaveTree(wctx, "/", atree, arch.loadParentTree(wctx, opts.ParentSnapshot))
+		if err != nil {
+			return restic.ID{}, ItemStats{}, err
+		}
+
+		// NB: Primary Snapshot method does a zero-length check here on tree.Nodes
+		return arch.saveTree(wctx, tree)
+	}()
+	debug.Log("saved tree, error: %v", err)
+
+	t.Kill(nil)
+	werr := t.Wait()
+	debug.Log("err is %v, werr is %v", err, werr)
+	if err == nil || errors.Cause(err) == context.Canceled {
+		err = werr
+	}
+
+	if err != nil {
+		debug.Log("error while saving tree: %v", err)
+		return restic.ID{}, err
+	}
+
+	arch.CompleteItem("/", nil, nil, stats, time.Since(start))
+
+	err = arch.Repo.Flush(ctx)
+	if err != nil {
+		return restic.ID{}, err
+	}
+
+	return rootTreeID, nil
+}
