@@ -709,7 +709,6 @@ type SnapshotOptions struct {
 	Excludes       []string
 	Time           time.Time
 	ParentSnapshot restic.ID
-	AllowEmpty     bool
 }
 
 // loadParentTree loads a tree referenced by snapshot id. If id is null, nil is returned.
@@ -774,7 +773,53 @@ func (arch *Archiver) runWorkers(ctx context.Context, t *tomb.Tomb) {
 
 // Snapshot saves several targets and returns a snapshot.
 func (arch *Archiver) Snapshot(ctx context.Context, targets []string, opts SnapshotOptions) (*restic.Snapshot, restic.ID, error) {
-	rootTreeID, err := arch.DrySnapshot(ctx, targets, opts)
+	cleanTargets, err := resolveRelativeTargets(arch.FS, targets)
+	if err != nil {
+		return nil, restic.ID{}, err
+	}
+
+	atree, err := NewTree(arch.FS, cleanTargets)
+	if err != nil {
+		return nil, restic.ID{}, err
+	}
+
+	var t tomb.Tomb
+	wctx := t.Context(ctx)
+
+	arch.runWorkers(wctx, &t)
+
+	start := time.Now()
+
+	debug.Log("starting snapshot: %+v", atree)
+	rootTreeID, stats, err := func() (restic.ID, ItemStats, error) {
+		tree, err := arch.SaveTree(wctx, "/", atree, arch.loadParentTree(wctx, opts.ParentSnapshot))
+		if err != nil {
+			return restic.ID{}, ItemStats{}, err
+		}
+
+		if len(tree.Nodes) == 0 {
+			return restic.ID{}, ItemStats{}, errors.New("snapshot is empty")
+		}
+
+		return arch.saveTree(wctx, tree)
+	}()
+	debug.Log("saved tree, error: %v", err)
+
+	t.Kill(nil)
+	werr := t.Wait()
+	debug.Log("err is %v, werr is %v", err, werr)
+	if err == nil || errors.Cause(err) == context.Canceled {
+		err = werr
+	}
+
+	if err != nil {
+		debug.Log("error while saving tree: %v", err)
+		return nil, restic.ID{}, err
+	}
+
+	arch.CompleteItem("/", nil, nil, stats, time.Since(start))
+
+	err = arch.Repo.Flush(ctx)
 	if err != nil {
 		return nil, restic.ID{}, err
 	}
@@ -826,10 +871,7 @@ func (arch *Archiver) DrySnapshot(ctx context.Context, targets []string, opts Sn
 			return restic.ID{}, ItemStats{}, err
 		}
 
-		if len(tree.Nodes) == 0 && !opts.AllowEmpty {
-			return restic.ID{}, ItemStats{}, errors.New("snapshot is empty")
-		}
-
+		// NB: Primary Snapshot method does a zero-length check here on tree.Nodes
 		return arch.saveTree(wctx, tree)
 	}()
 	debug.Log("saved tree, error: %v", err)

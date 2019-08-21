@@ -216,7 +216,6 @@ func runSync(opts SyncOptions, gopts GlobalOptions, term *termstatus.Terminal, a
 		Time:           time.Now(),
 		Hostname:       opts.Host,
 		ParentSnapshot: id,
-		AllowEmpty:     true,
 	}
 
 	if !gopts.JSON {
