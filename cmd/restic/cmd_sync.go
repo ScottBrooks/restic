@@ -32,7 +32,7 @@ WARNING: Files in the target directory that are not in the snapshot will be dele
 	DisableAutoGenTag: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var t tomb.Tomb
-		term := termstatus.New(globalOptions.stdout, globalOptions.stderr, globalOptions.Quiet)
+		term := termstatus.New(globalOptions.stdout, globalOptions.stderr, true)
 		t.Go(func() error { term.Run(t.Context(globalOptions.ctx)); return nil })
 
 		err := runSync(syncOptions, globalOptions, term, args)
@@ -54,7 +54,7 @@ type SyncOptions struct {
 	Tags     restic.TagLists
 	Verify   bool
 	Progress bool
-	Delete bool
+	Delete   bool
 }
 
 var syncOptions SyncOptions
@@ -94,11 +94,14 @@ func (ft *FileTracker) CompleteItem(item string, remoteCopy, localCopy *restic.N
 
 			// Mark any directories these unexpected files are in as unexpected.
 			// Any that are not later un-marked in a remote scan are deleted.
+			parentDir := item
 			for {
-				parentDir := path.Dir(item)
-				if _, ok := ft.UnexpectedDirs[parentDir]; ok {
+				parentDir = path.Dir(parentDir)
+				// Stop if we have already seen this directory or if we have reached the root
+				if _, ok := ft.UnexpectedDirs[parentDir]; ok || parentDir == "/" || parentDir == "." {
 					break
 				}
+				Verbosef("Marking %s for directory deletion\n", parentDir)
 				ft.UnexpectedDirs[parentDir] = true
 			}
 		} else if !remoteCopy.EqualsContent(*localCopy) {
@@ -247,15 +250,15 @@ func runSync(opts SyncOptions, gopts GlobalOptions, term *termstatus.Terminal, a
 
 		// If we didn't find a result, it means we did not scan it locally & should fetch it
 		if !ok && node.Type == "file" {
-			Verbosef("Fetching %s - file was not found in local scan\n", item)
-			fileTracker.FilesToGet[item] = true
+			Verbosef("Fetching %s - file was not found in local scan\n", swapped)
+			fileTracker.FilesToGet[swapped] = true
 			shouldGet, ok = true, true
 		}
 
 		// Unmark for deletion any directories that exist on the remote server
-		if _, ok := fileTracker.UnexpectedDirs[item]; ok && node.Type == "dir" {
-			Verbosef("Unmarked %s for deletion\n", item)
-			delete(fileTracker.UnexpectedDirs, item)
+		if _, ok := fileTracker.UnexpectedDirs[swapped]; ok && node.Type == "dir" {
+			Verbosef("Unmarked %s for deletion\n", swapped)
+			delete(fileTracker.UnexpectedDirs, swapped)
 		}
 
 		selectedForRestore = ok && shouldGet
@@ -325,6 +328,7 @@ func deleteFilesAndDirectories(fileTracker FileTracker, opts SyncOptions) int {
 	depthSortedUnexpectedDirs := map[int][]string{}
 	maxDepth := 0
 	for dir := range fileTracker.UnexpectedDirs {
+		// We use / as path separator for table lookups as it's shared on the backend
 		depth := strings.Count(dir, "/")
 		if depth > maxDepth {
 			maxDepth = depth
