@@ -32,7 +32,7 @@ WARNING: Files in the target directory that are not in the snapshot will be dele
 	DisableAutoGenTag: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var t tomb.Tomb
-		term := termstatus.New(globalOptions.stdout, globalOptions.stderr, globalOptions.Quiet)
+		term := termstatus.New(globalOptions.stdout, globalOptions.stderr, true)
 		t.Go(func() error { term.Run(t.Context(globalOptions.ctx)); return nil })
 
 		err := runSync(syncOptions, globalOptions, term, args)
@@ -142,8 +142,6 @@ func runSync(opts SyncOptions, gopts GlobalOptions, term *termstatus.Terminal, a
 	}
 
 	p := ui.NewBackup(term, gopts.verbosity)
-	// Hack to disable status line as it causes problems by listing every file
-	p.MinUpdatePause = time.Hour
 
 	// use the terminal for stdout/stderr
 	prevStdout, prevStderr := gopts.stdout, gopts.stderr
