@@ -239,8 +239,14 @@ func runSync(opts SyncOptions, gopts GlobalOptions, term *termstatus.Terminal, a
 
 	totalErrors := 0
 	res.Error = func(location string, err error) error {
-		Warnf("ignoring error for %s: %s\n", location, err)
-		totalErrors++
+		if err != nil {
+			// If we cannot find a blob we need to exit
+			if perr, ok := err.(*os.PathError); ok {
+				Exitf(5, "Could not find file for %s on %s:", perr)
+			}
+			Warnf("ignoring error for %s: %s\n", location, err)
+			totalErrors++
+		}
 		return nil
 	}
 
